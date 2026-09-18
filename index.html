@@ -136,6 +136,8 @@ html,body{overscroll-behavior:none;overflow-x:hidden}
   <input id="blk_w" type="number" value="1" min="0.1" step="0.1" max="999"><span class="times">×</span><input id="blk_h" type="number" value="1" min="0.1" step="0.1" max="999">
   <button id="blk_apply">设为当前素材</button>
   <label class="sw"><input type="checkbox" id="blk_on">显示阻挡</label>
+  <button id="blk_paint">🚧 刷阻挡</button><button id="blk_erase">🧹 刷可走</button>
+  <label class="sw"><input type="checkbox" id="blk_show2" checked>显示刷痕迹</label>
 </div>
 
 <div class="bar" id="sizerow">
@@ -266,14 +268,19 @@ let vis=[true,true,true,true],ovAlpha=1;
 let cv=document.getElementById("cv"), ctx=cv.getContext("2d");
 let FRAMES=[], atlas=null, cells=null, cellsf=null, painting=false, undoStack=[];
 function idx(x,y){ return layer*W*H + y*W+x; }
-function mkCells(f){ cells=new Array(6*W*H); cellsf=new Uint8Array(6*W*H); const b=(f===undefined?0:f);
+function mkCells(f){ cells=new Array(7*W*H); cellsf=new Uint8Array(7*W*H); const b=(f===undefined?0:f);
   for(let i=0;i<W*H;i++) cells[i]=b;
   for(let i=W*H;i<2*W*H;i++) cells[i]=EMPTY;
   for(let i=2*W*H;i<3*W*H;i++) cells[i]=0;
   for(let i=3*W*H;i<4*W*H;i++) cells[i]=EMPTY;
   for(let i=4*W*H;i<5*W*H;i++) cells[i]=0;
   for(let i=5*W*H;i<6*W*H;i++) cells[i]=EMPTY;
+  for(let i=6*W*H;i<7*W*H;i++) cells[i]=0;
   ELV=new Int16Array(W*H); }
+function BK(x,y){ if(!cells) return 0; if(x<0||y<0||x>=W||y>=H) return 0; return cells[6*W*H+y*W+x]?1:0; }
+function putBlk(c,v){ var sp=brushSpan(brush);
+  for(let dy=-sp[0];dy<=sp[1];dy++) for(let dx=-sp[0];dx<=sp[1];dx++){ const mx=c.x+dx, my=c.y+dy; if(mx<0||my<0||mx>=W||my>=H) continue;
+    cells[6*W*H+my*W+mx]=v?1:0; } }
 function WF(x,y){ if(x<0||y<0||x>=W||y>=H) return EMPTY; var v=cells[5*W*H+y*W+x]; return (v===undefined)?EMPTY:v; }
 function setWF(x,y,v){ if(x<0||y<0||x>=W||y>=H) return; cells[5*W*H+y*W+x]=v; }
 function brushSpan(s){ s=Math.max(1,Math.min(32,Math.round(s)||1)); return [Math.floor((s-1)/2), Math.floor(s/2)]; }
@@ -456,6 +463,7 @@ cv.addEventListener("pointerdown",e=>{ e.preventDefault();
   if(shTool){ try{ const cc=(SUB>1?subAt(e):cellAt(e)); if(shMode==="del") delShadowAt(cc); else putShadow(cc); }catch(err){} render(); return; }
   if(tool==="move"){ const w=document.getElementById("stage"); panS={x:e.clientX,y:e.clientY,l:w.scrollLeft,t:w.scrollTop}; return; }
   snatch(); painting=true;
+  if(blkBrush){ const _bc=cellAt(e); putBlk(_bc, blkBrush===1); render(); save(); return; }
   if(layer===4&&SUB>1){ var _s1=subAt(e); if(tool==="erase"){ elEraseAt(_s1); } else { if(tool==="up") elDir=1; else if(tool==="down") elDir=-1; putElev(_s1); } render(); save(); return; }
   const c=cellAt(e);
   if(tool==="fill"){ if(c.x>=0&&c.y>=0&&c.x<W&&c.y<H) flood(c.x,c.y,cur); }
@@ -469,6 +477,7 @@ cv.addEventListener("pointermove",e=>{
   const c=cellAt(e);
   document.getElementById("status").textContent="坐标 x="+c.x+"  y="+c.y+"    （地图 "+W+"×"+H+"，图层："+(layer===0?"底图":layer===1?"贴花":layer===3?"地形叠加":layer===4?"立体起伏":"高度标记")+"，素材："+(FRAMES[cur]?FRAMES[cur].name:"?")+"）"+(selRect?("   框选 "+selRect.w+"×"+selRect.h):"")+(layer===1?("   本格叠加 "+ovCount(c)+" 片"):"")+(rnd?"   随机开":"")+(flipX?"   翻X开":"");
   if(!painting) return;
+  if(blkBrush){ const _bc2=cellAt(e); putBlk(_bc2, blkBrush===1); render(); return; }
   if(layer===4&&SUB>1){ var _s2=subAt(e); if(tool==="erase"){ elEraseAt(_s2); } else { putElev(_s2); } render(); return; }
   if(tool==="up"){ putH(c,1); render(); return; }
   if(tool==="down"){ putH(c,-1); render(); return; }
@@ -489,17 +498,17 @@ function demo(){ const seq=[0,3,2,4]; const _lay=layer; layer=0;
     cells[idx(x,y)]=seq[t];
   } layer=_lay; if(cells){ cells.fill(EMPTY,W*H,2*W*H); cells.fill(0,2*W*H); cellsf.fill(0); } snatch(); render(); save(); }
 function _hasAny(a){ if(!a||!a.length) return false; var t=a.join(""); for(var i=0;i<t.length;i++){ var c=t.charAt(i); if(c!==" "&&c!=="0"&&c!=="."&&c!=="\n") return true; } return false; }
-function toJSON(){ const rows=[],ov=[],ov2=[],hi=[],el=[],ew=[],elv=[],fx=[],fox=[]; const _cw=Math.max(1,Math.min(64,capDecal)), _tw=Math.max(1,Math.min(64,capTile));
-  for(let y=0;y<H;y++){ let s="",t="",t2="",fxr="",foxr=""; const qh=[],qe=[],qw=[];
+function toJSON(){ const rows=[],ov=[],ov2=[],hi=[],el=[],ew=[],elv=[],bk=[],fx=[],fox=[]; const _cw=Math.max(1,Math.min(64,capDecal)), _tw=Math.max(1,Math.min(64,capTile));
+  for(let y=0;y<H;y++){ let s="",t="",t2="",fxr="",foxr=""; const qh=[],qe=[],qw=[],qb=[];
     for(let x=0;x<W;x++){ const a=cells[y*W+x]; s+=CHARS[a%36]||"0";
       const b=cells[W*H+y*W+x]; const ba=(b===EMPTY||b===undefined)?[]:(Array.isArray(b)?b:[b]);
       for(let k=0;k<_cw;k++){ t+=(ba[k]===undefined?".":(CHARS[ba[k]%36]||"0")); }
       const b4=cells[3*W*H+y*W+x]; const b5=(b4===EMPTY||b4===undefined)?[]:(Array.isArray(b4)?b4:[b4]); for(let k=0;k<_tw;k++){ t2+=(b5[k]===undefined?".":(CHARS[b5[k]%36]||"0")); }
-      qh.push(String(cells[2*W*H+y*W+x])); qe.push(String(cells[4*W*H+y*W+x]||0)); var _wv=cells[5*W*H+y*W+x]; qw.push((_wv===EMPTY||_wv===undefined)?".":CHARS[_wv%36]);
+      qh.push(String(cells[2*W*H+y*W+x])); qe.push(String(cells[4*W*H+y*W+x]||0)); var _wv=cells[5*W*H+y*W+x]; qw.push((_wv===EMPTY||_wv===undefined)?".":CHARS[_wv%36]); qb.push(BK(x,y)?"1":".");
       fxr+=((cellsf[y*W+x]&1)?"1":"0");
       foxr+=((cellsf[W*H+y*W+x]&1)?"1":"0"); }
-    rows.push(s); ov.push(t); ov2.push(t2); hi.push(qh.join(" ")); el.push(SUB===1?qe.join(" "):""); ew.push(qw.join("")); elv.push(SUB===1?"":qe.join(" ")); fx.push(fxr); fox.push(foxr); }
-  return JSON.stringify({w:W,h:H,frames:FRAMES.map(f=>f.name),rows:rows,ov:ov,ov2:ov2,ovw:_cw,ov2w:_tw,cw:CW,ch:CH,hi:(_hasAny(hi)?hi:null),el:(_hasAny(el)?el:null),ew:(_hasAny(ew)?ew:null),elv:(_hasAny(elv)?elv:null),sub:SUB,bw:Math.max(1,Math.round(W/SUB)),bh:Math.max(1,Math.round(H/SUB)),bcw:(BASE_CW||Math.round(CW*SUB)),bch:(BASE_CH||Math.round(CH*SUB)),wmode:(elTex||"grad"),pad:elPad,sub:subN,epx:elPx,emax:ELMAX,eblk:(elBlk?1:0),ewall:(elWall?1:0),framesMeta:FRAMES.map(function(f){return {n:f.name,k:f.kind||"",w:(f.fw||1),h:(f.fh||1),d:(f.dyn?1:0),b:(f.blk?(f.blk.m+":"+f.blk.w+"x"+f.blk.h):"")};}),fx:fx,fox:fox,anims:(function(){var m=getFrameAnims();return FRAMES.filter(function(f){return m[f.name];}).map(function(f){return {name:f.name,a:m[f.name]};});})()},null,1); }
+    rows.push(s); ov.push(t); ov2.push(t2); hi.push(qh.join(" ")); bk.push(qb.join("")); el.push(SUB===1?qe.join(" "):""); ew.push(qw.join("")); elv.push(SUB===1?"":qe.join(" ")); fx.push(fxr); fox.push(foxr); }
+  return JSON.stringify({w:W,h:H,frames:FRAMES.map(f=>f.name),rows:rows,ov:ov,ov2:ov2,ovw:_cw,ov2w:_tw,cw:CW,ch:CH,hi:(_hasAny(hi)?hi:null),el:(_hasAny(el)?el:null),ew:(_hasAny(ew)?ew:null),elv:(_hasAny(elv)?elv:null),sub:SUB,blk:(_hasAny(bk)?bk:null),bw:Math.max(1,Math.round(W/SUB)),bh:Math.max(1,Math.round(H/SUB)),bcw:(BASE_CW||Math.round(CW*SUB)),bch:(BASE_CH||Math.round(CH*SUB)),wmode:(elTex||"grad"),pad:elPad,sub:subN,epx:elPx,emax:ELMAX,eblk:(elBlk?1:0),ewall:(elWall?1:0),framesMeta:FRAMES.map(function(f){return {n:f.name,k:f.kind||"",w:(f.fw||1),h:(f.fh||1),d:(f.dyn?1:0),b:(f.blk?(f.blk.m+":"+f.blk.w+"x"+f.blk.h):"")};}),fx:fx,fox:fox,anims:(function(){var m=getFrameAnims();return FRAMES.filter(function(f){return m[f.name];}).map(function(f){return {name:f.name,a:m[f.name]};});})()},null,1); }
 function fromJSON(txt){ const o=JSON.parse(txt); W=o.w||64; H=o.h||64; if(o.cw) CW=o.cw; if(o.ch) CH=o.ch; const _cw=(o.ovw||4), _tw=(o.ov2w||4);
   if(o.pad!==undefined) elPad=Math.max(0,Math.min(8,Math.round(o.pad)||0));
   if(o.sub) subN=Math.max(1,Math.min(24,Math.round(o.sub)||1));
@@ -528,6 +537,7 @@ function fromJSON(txt){ const o=JSON.parse(txt); W=o.w||64; H=o.h||64; if(o.cw) 
     else if(row.length>=W*4){ const st=[]; for(let k=0;k<4;k++){ const c3=row[x*4+k]; const v3=CHARS.indexOf(c3); if(c3!==undefined&&c3!=="."&&v3>=0) st.push(v3); } cells[W*H+y*W+x]=(st.length===0)?EMPTY:(st.length===1?st[0]:st); } else { const b=row[x]; const v2=CHARS.indexOf(b); cells[W*H+y*W+x]=(b===undefined||b==="."||v2<0)?EMPTY:v2; }
     const row2=((o.ov2&&o.ov2[y])||""); if(row2.length>=W*_tw){ const st2=[]; for(let k=0;k<_tw;k++){ const c4=row2[x*_tw+k]; const v4=CHARS.indexOf(c4); if(c4!==undefined&&c4!=="."&&v4>=0) st2.push(v4); } cells[3*W*H+y*W+x]=(st2.length===0)?EMPTY:st2; }
     const _hr=((o.hi&&o.hi[y])||""); const hv=(_hr.indexOf(" ")>=0?parseInt(_hr.split(" ")[x],10):parseInt(_hr[x],10)); cells[2*W*H+y*W+x]=(isNaN(hv)?0:Math.max(HMIN,Math.min(HMAX,hv)));
+    if(o.blk&&o.blk[y]){ const _br=o.blk[y]; for(let _bx=0;_bx<W;_bx++){ cells[6*W*H+y*W+_bx]=(_br.charAt(_bx)==="1")?1:0; } }
     if(o.ew&&o.ew[y]){ const _wc=o.ew[y][x]; const _wv=CHARS.indexOf(_wc); cells[5*W*H+y*W+x]=(_wc===undefined||_wc==="."||_wv<0)?EMPTY:_wv; }
     const _er=((o.el&&o.el[y])||""); if(_er){ const ev=(_er.indexOf(" ")>=0?parseInt(_er.split(" ")[x],10):parseInt(_er[x],10)); cells[4*W*H+y*W+x]=(isNaN(ev)?0:Math.max(-ELMAX,Math.min(ELMAX,ev))); }
     if(o.fx&&((o.fx[y]||"")[x]==="1")) cellsf[y*W+x]|=1;
@@ -681,7 +691,13 @@ function applyFrameFits(){ var m=getFrameFits(); FRAMES.forEach(function(f){ if(
 function getFrameBlks(){ try{ return JSON.parse(localStorage.getItem("frogmap_frameblk")||"{}"); }catch(e){ return {}; } }
 function setFrameBlk(name,o){ try{ var m=getFrameBlks(); if(o&&o.m) m[name]=o; else delete m[name]; localStorage.setItem("frogmap_frameblk", JSON.stringify(m)); }catch(e){} }
 function applyFrameBlks(){ var m=getFrameBlks(); FRAMES.forEach(function(f){ if(m[f.name]) f.blk=m[f.name]; }); }
-var showBlk=false;
+var showBlk=false, blkBrush=0, blkShow=true;
+function setBlkBrush(m){ if(blkBrush===m){ blkBrush=0; } else { blkBrush=m; }
+  var a=document.getElementById("blk_paint"), b=document.getElementById("blk_erase");
+  if(a) a.classList.toggle("on", blkBrush===1); if(b) b.classList.toggle("on", blkBrush===2); }
+try{ var _bp=document.getElementById("blk_paint"); if(_bp) _bp.addEventListener("click",function(){ setBlkBrush(1); });
+  var _be=document.getElementById("blk_erase"); if(_be) _be.addEventListener("click",function(){ setBlkBrush(2); });
+  var _bs=document.getElementById("blk_show2"); if(_bs) _bs.addEventListener("change",function(){ blkShow=!!_bs.checked; render(); }); }catch(e){}
 function drawBlks(){ if(!showBlk) return; var z=zoom; ctx.save();
   function one(x,y,fr){ if(!fr||!fr.blk) return; var mm=(fr.blk.m||"cell"); var bw,bh;
     if(mm==="px"){ bw=(fr.blk.w||1)/CW; bh=(fr.blk.h||1)/CH; } else { bw=(fr.blk.w||1); bh=(fr.blk.h||1); }
@@ -690,6 +706,7 @@ function drawBlks(){ if(!showBlk) return; var z=zoom; ctx.save();
   for(var y=0;y<H;y++) for(var x=0;x<W;x++){ var v0=cells[y*W+x]; one(x,y,FRAMES[v0]);
     var v1=cells[W*H+y*W+x]; if(Array.isArray(v1)){ for(var q=0;q<v1.length;q++) one(x,y,FRAMES[v1[q]]); } else one(x,y,FRAMES[v1]);
     var v2=cells[3*W*H+y*W+x]; if(Array.isArray(v2)){ for(var q2=0;q2<v2.length;q2++) one(x,y,FRAMES[v2[q2]]); } else one(x,y,FRAMES[v2]);
+    if(showBlk&&blkShow&&BK(x,y)){ ctx.fillStyle="rgba(255,90,60,0.32)"; ctx.fillRect(x*CW*z,y*CH*z,CW*z,CH*z); }
     var _ev=EL(x,y); if(elBlk&&_ev!==0){ ctx.fillStyle="rgba(40,140,220,0.20)"; ctx.fillRect(x*CW*z,y*CH*z,CW*z,CH*z); ctx.strokeStyle="rgba(40,140,220,0.85)"; ctx.lineWidth=1; ctx.strokeRect(x*CW*z+0.5,y*CH*z+0.5,CW*z-1,CH*z-1); } }
   ctx.restore(); }
 function isDecal(f){ return !!(f && f.kind==="decal"); }
@@ -845,7 +862,7 @@ try{
   loadElevCfg();
   var _eu=document.getElementById("el_up"); if(_eu) _eu.addEventListener("click",function(){ elDir=1; syncElevUI(); });
   var _ed2=document.getElementById("el_dn"); if(_ed2) _ed2.addEventListener("click",function(){ elDir=-1; syncElevUI(); });
-  var _ec2=document.getElementById("el_clr"); if(_ec2) _ec2.addEventListener("click",function(){ snatch(); if(cells){ cells.fill(0,4*W*H,5*W*H); cells.fill(EMPTY,5*W*H,6*W*H); } if(ELV) ELV.fill(0); render(); save(); });
+  var _ec2=document.getElementById("el_clr"); if(_ec2) _ec2.addEventListener("click",function(){ snatch(); if(cells){ cells.fill(0,4*W*H,5*W*H); cells.fill(EMPTY,5*W*H,6*W*H); cells.fill(0,6*W*H,7*W*H); } if(ELV) ELV.fill(0); render(); save(); });
   ["el_step","el_px","el_max","el_pad","el_sub"].forEach(function(id){ var e=document.getElementById(id); if(e) e.addEventListener("change",function(){ var _p=elPad; readElevUI();
     if(elPad!==_p){ sizeCanvas(true); } if(subOn && subN!==SUB){ applyMode(subN); } syncElevUI(); render(); saveNow(); }); });
   ["el_wall","el_blk"].forEach(function(id){ var e=document.getElementById(id); if(e) e.addEventListener("change",function(){ readElevUI(); render(); }); });
